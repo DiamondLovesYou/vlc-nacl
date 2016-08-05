@@ -264,31 +264,16 @@ void* vlc_ppapi_array_output_get_buffer(void* user_data, uint32_t count, uint32_
 }
 
 PP_Resource vlc_ppapi_get_temp_fs(PP_Instance instance) {
-  static atomic_uintptr_t temp_fs = ATOMIC_VAR_INIT(0);
+  PP_Resource fs = 0;
 
-  if(temp_fs == 0) {
-    PP_Resource fs = atomic_load(&temp_fs);
-    if(fs != 0) {
-      return fs;
-    }
-
-    const vlc_ppapi_file_system_t* ifs = vlc_getPPAPI_FileSystem();
-    fs = ifs->Create(instance, PP_FILESYSTEMTYPE_LOCALTEMPORARY);
-    if(ifs->Open(fs, 0, PP_BlockUntilComplete()) != PP_OK) {
-      vlc_subResReference(fs);
-      fs = 0;
-    }
-    uintptr_t expected = 0;
-    if(fs == 0) {
-      return fs;
-    } else if(!atomic_compare_exchange_strong(&temp_fs, &expected, (uintptr_t)fs)) {
-      // another thread beat us
-      vlc_subResReference(fs);
-      return atomic_load(&temp_fs);
-    }
+  const vlc_ppapi_file_system_t* ifs = vlc_getPPAPI_FileSystem();
+  fs = ifs->Create(instance, PP_FILESYSTEMTYPE_LOCALTEMPORARY);
+  if(ifs->Open(fs, 0, PP_BlockUntilComplete()) != PP_OK) {
+    vlc_subResReference(fs);
+    fs = 0;
   }
 
-  return temp_fs;
+  return fs;
 }
 
 // set from vlc_did_create in bin/ppapi.c so a few modules which are initialized

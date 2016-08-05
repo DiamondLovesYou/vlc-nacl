@@ -53,14 +53,17 @@ VLC_PPAPI_MODULE_NAME("vlc");
 #include "vlc_static_modules_init.h"
 #undef PLUGIN_INIT_SYMBOL
 
-// A few modules are manually disabled because they trigger asserts within
-// clang:
+// Blacklisting:
 #define PLUGIN_INIT_SYMBOL(name)                          \
   int CONCATENATE(vlc_entry, name)                        \
        (int (*one)(void*, void*, int, ...),               \
         void* two) {                                      \
     VLC_UNUSED(one); VLC_UNUSED(two);                     \
     return VLC_EGENERIC; }
+
+#ifdef __VLC_PNACL_TESTING__
+PLUGIN_INIT_SYMBOL(https) // XXX this plugin is missing it's vlc_entry__https function; I'll need to edit a patch file.
+#endif
 
 #undef PLUGIN_INIT_SYMBOL
 
@@ -214,13 +217,12 @@ int32_t PPP_InitializeModule(PP_Module mod, PPB_GetInterface get_interface) {
   g_module = mod;
 
   if(_internal_VLCInitializeGetInterface(get_interface) != PP_TRUE) {
-    return PP_FALSE;
+    return PP_ERROR_FAILED;
   }
 
   if(!glInitializePPAPI(get_interface)) {
     printf("failed to initialize ppapi gles2 interface");
-    abort();
-    return PP_FALSE;
+    return PP_ERROR_FAILED;
   } else {
     return PP_OK;
   }

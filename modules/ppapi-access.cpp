@@ -33,6 +33,7 @@
 #include <queue>
 #include <map>
 #include <string>
+#include <memory>
 
 #include <vlc_common.h>
 #include <vlc_plugin.h>
@@ -271,6 +272,7 @@ private:
 struct access_sys_t {
   PP_Instance instance;
   PP_Resource message_loop;
+  PP_Resource temp_fs;
 
   PP_Resource cache_meta_fref;
 
@@ -649,8 +651,8 @@ int32_t LoaderBuffer::read_multi_part_headers() {
   return VLC_SUCCESS;
 }
 
-inline static PP_Resource get_temp_fs(PP_Instance instance) {
-  return vlc_ppapi_get_temp_fs(instance);
+inline static PP_Resource get_temp_fs(access_sys_t* sys) {
+  return sys->temp_fs;
 }
 static void save_metas(access_sys_t* sys) {
   assert(sys != NULL);
@@ -739,7 +741,7 @@ static PP_Resource get_cache_file_ref(access_sys_t* sys, const size_t meta_index
   const vlc_ppapi_file_ref_t* ifile_ref = vlc_getPPAPI_FileRef();
 
   // open the file
-  PP_Resource cache_fs = get_temp_fs(sys->instance);
+  PP_Resource cache_fs = get_temp_fs(sys);
 
   cache_meta_t meta = sys->cache_metas[meta_index];
   assert(meta.id < sys->next_meta_id);
@@ -954,7 +956,7 @@ static int32_t resize_meta(access_sys_t* sys, const size_t meta, const uint64_t 
     msg_Warn(sys->access, "no more quota or space left; removing some old cached videos.");
     VLC_PPAPI_ARRAY_OUTPUT(entries_out, output);
 
-    const PP_Resource cache_dir = ifile_ref->Create(get_temp_fs(sys->instance), "/vlc-cache");
+    const PP_Resource cache_dir = ifile_ref->Create(get_temp_fs(sys), "/vlc-cache");
     assert(cache_dir != 0);
 
     code = ifile_ref->ReadDirectoryEntries(cache_dir, output, PP_BlockUntilComplete());
@@ -1790,7 +1792,7 @@ static int Open(vlc_object_t* obj) {
 
   msg_Dbg(access, "attempting to open PPB_URLLoader");
 
-  const PP_Resource cache_fs = get_temp_fs(instance);
+  const PP_Resource cache_fs = vlc_ppapi_get_temp_fs(instance);
   if(cache_fs == 0) {
     msg_Err(access, "couldn't open root file system");
     vlc_subResReference(msg_loop);
@@ -1805,6 +1807,7 @@ static int Open(vlc_object_t* obj) {
     if(cache_dir == 0) {
       msg_Err(access, "error while create cache dir file_ref");
       vlc_subResReference(msg_loop);
+      vlc_subResReference(cache_fs);
       return VLC_EGENERIC;
     }
 
@@ -1814,6 +1817,7 @@ static int Open(vlc_object_t* obj) {
     if(code != PP_OK) {
       msg_Err(access, "error while creating the `/vlc-cache` directory");
       vlc_subResReference(msg_loop);
+      vlc_subResReference(cache_fs);
       return VLC_EGENERIC;
     }
   }
@@ -1839,12 +1843,14 @@ static int Open(vlc_object_t* obj) {
 
   if(cache_file_ref == 0) {
     vlc_subResReference(msg_loop);
+    vlc_subResReference(cache_fs);
     return VLC_EGENERIC;
   }
 
   PP_Resource cache_file_io = ifile_io->Create(instance);
   if(cache_file_io == 0) {
     vlc_subResReference(msg_loop);
+    vlc_subResReference(cache_fs);
     return VLC_EGENERIC;
   }
 
@@ -1854,6 +1860,7 @@ static int Open(vlc_object_t* obj) {
   if(code != PP_OK && code != PP_ERROR_FILENOTFOUND) {
     vlc_subResReference(cache_file_io);
     vlc_subResReference(msg_loop);
+    vlc_subResReference(cache_fs);
     return VLC_EGENERIC;
   }
 
@@ -1871,6 +1878,7 @@ static int Open(vlc_object_t* obj) {
       vlc_subResReference(cache_file_io);
       vlc_subResReference(cache_file_ref);
       vlc_subResReference(msg_loop);
+      vlc_subResReference(cache_fs);
       return VLC_EGENERIC;
     }
 
@@ -1906,6 +1914,7 @@ static int Open(vlc_object_t* obj) {
 	vlc_subResReference(cache_file_io);
 	vlc_subResReference(cache_file_ref);
 	vlc_subResReference(msg_loop);
+        vlc_subResReference(cache_fs);
         return VLC_ENOMEM;
       }
     }
@@ -1927,6 +1936,7 @@ static int Open(vlc_object_t* obj) {
     if(cache_metas != NULL) free(cache_metas);
     vlc_subResReference(cache_file_ref);
     vlc_subResReference(msg_loop);
+    vlc_subResReference(cache_fs);
     return VLC_EGENERIC;
   }
 
@@ -1935,7 +1945,7 @@ static int Open(vlc_object_t* obj) {
     // sanity check.
     VLC_PPAPI_ARRAY_OUTPUT(entries_out, output);
 
-    const PP_Resource cache_dir = ifile_ref->Create(get_temp_fs(instance), "/vlc-cache");
+    const PP_Resource cache_dir = ifile_ref->Create(cache_fs, "/vlc-cache");
     assert(cache_dir != 0);
 
     code = ifile_ref->ReadDirectoryEntries(cache_dir, output, PP_BlockUntilComplete());
@@ -2053,6 +2063,7 @@ static int Open(vlc_object_t* obj) {
     if(cache_files == NULL) {
       vlc_subResReference(cache_file_ref);
       vlc_subResReference(msg_loop);
+      vlc_subResReference(cache_fs);
       return VLC_ENOMEM;
     }
     cache_metas = (cache_meta_t*)calloc(1, sizeof(cache_meta_t));
@@ -2060,6 +2071,7 @@ static int Open(vlc_object_t* obj) {
       free(cache_files);
       vlc_subResReference(cache_file_ref);
       vlc_subResReference(msg_loop);
+      vlc_subResReference(cache_fs);
       return VLC_ENOMEM;
     }
 
@@ -2067,18 +2079,10 @@ static int Open(vlc_object_t* obj) {
     data_cache_count = 1;
   }
 
-  ;
-  if(sys == NULL) {
-    free(cache_files);
-    free(cache_metas);
-    vlc_subResReference(cache_file_ref);
-    vlc_subResReference(msg_loop);
-    return VLC_ENOMEM;
-  }
-
   sys->instance = instance;
   sys->message_loop = msg_loop;
   sys->cache_meta_fref = cache_file_ref;
+  sys->temp_fs = cache_fs;
 
   sys->request_info = sys->response_info = 0;
 
@@ -2105,6 +2109,7 @@ static int Open(vlc_object_t* obj) {
     free(cache_metas);
     vlc_subResReference(cache_file_ref);
     vlc_subResReference(msg_loop);
+    vlc_subResReference(cache_fs);
     return code;
   }
 
@@ -2141,6 +2146,7 @@ static void Close(vlc_object_t* obj) {
     }
     free(sys->data_caches);
   }
+  vlc_subResReference(sys->temp_fs);
 
   delete sys;
 

@@ -35,6 +35,7 @@
 
 #include <math.h>
 #include <climits>
+#include <memory>
 
 #include <ppapi/c/ppp_message_handler.h>
 #include <ppapi/c/pp_directory_entry.h>
@@ -64,7 +65,7 @@ vlc_module_end()
 static int Open(vlc_object_t* obj) {
   intf_thread_t* intf = (intf_thread_t*)obj;
 
-  intf_sys_t* sys = new (std::nothrow) intf_sys_t;
+  std::unique_ptr<intf_sys_t> sys(new (std::nothrow) intf_sys_t);
   if(unlikely(sys == NULL)) {
     return VLC_ENOMEM;
   }
@@ -77,7 +78,6 @@ static int Open(vlc_object_t* obj) {
   if(unlikely(msg_loop == 0)) {
     vlc_ppapi_log_error(instance, "failed to create ppapi message loop");
     msg_Err(intf, "failed to create ppapi message loop");
-    free(sys);
     return VLC_EGENERIC;
   }
 
@@ -94,7 +94,7 @@ static int Open(vlc_object_t* obj) {
   vlc_mutex_lock(&sys->init_mutex);
   const int spawn = vlc_clone(&sys->handler_thread_id,
                               &ControlThreadEntry,
-                              sys,
+                              sys.get(),
                               VLC_THREAD_PRIORITY_LOW);
   if(unlikely(spawn != VLC_SUCCESS)) {
     vlc_ppapi_log_error(instance, "failed to spawn message loop thread");
@@ -103,7 +103,6 @@ static int Open(vlc_object_t* obj) {
     vlc_subResReference(sys->message_loop);
     vlc_mutex_unlock(&sys->init_mutex);
     vlc_mutex_destroy(&sys->init_mutex);
-    free(sys);
     return spawn;
   }
 
@@ -118,11 +117,13 @@ static int Open(vlc_object_t* obj) {
   var_AddCallback(pl_Get(sys->parent),
                   "input-current",
                   PlaylistEventCallback,
-                  static_cast<void*>(sys));
+                  static_cast<void*>(sys.get()));
 
   // make sure the root of instance has "ppapi-instance" set:
   var_Create(intf->p_libvlc, "ppapi-instance", VLC_VAR_INTEGER);
   var_SetInteger(intf->p_libvlc, "ppapi-instance", instance);
+
+  intf->p_sys = sys.release();
 
   return spawn;
 }
@@ -134,14 +135,17 @@ static void Close(vlc_object_t* obj) {
   const vlc_thread_t handler_id = sys->handler_thread_id;
 
   const vlc_ppapi_messaging_t* imsg = vlc_getPPAPI_Messaging();
-  vlc_subResReference(sys->message_loop);
   imsg->UnregisterMessageHandler(sys->instance);
+
+  const vlc_ppapi_message_loop_t* iloop = vlc_getPPAPI_MessageLoop();
+  iloop->PostQuit(sys->message_loop, PP_TRUE);
+  vlc_subResReference(sys->message_loop);
 
   void* returned;
   vlc_join(handler_id, &returned);
   VLC_UNUSED(returned);
 
-  // Don't free sys; the message handler thread does that.
+  delete sys;
   intf->p_sys = NULL;
 }
 
@@ -295,11 +299,13 @@ namespace sys {
 
     return_code = JS_SUCCESS;
 
-    const PP_Resource cache_dir = ifile_ref->Create(vlc_ppapi_get_temp_fs(sys->instance),
+    const PP_Resource cache_fs  = vlc_ppapi_get_temp_fs(sys->instance);
+    const PP_Resource cache_dir = ifile_ref->Create(cache_fs,
                                                     "/vlc-cache");
     if(cache_dir == 0) { return; }
     purge_dir(sys, cache_dir, false);
     vlc_subResReference(cache_dir);
+    vlc_subResReference(cache_fs);
   }
   static js_static_method_decl_t* g_handle_purge_cache =
     add_static_method("/sys/purge_cache()",
@@ -941,7 +947,6 @@ static void PPPHandleBlockingMessage(PP_Instance instance, void* sys_,
 static void PPPDestroy(PP_Instance instance, void* sys_) {
   VLC_UNUSED(instance);
   assert(((intf_sys_t*)sys_)->instance == instance);
-  free(sys_);
 }
 
 static const struct PPP_MessageHandler_0_2 ppp_messaging = {
@@ -966,8 +971,6 @@ static void* ControlThreadEntry(void* ctxt) {
   vlc_mutex_unlock(&sys->init_mutex);
 
   iloop->Run(sys->message_loop);
-
-  delete sys;
 
   return NULL;
 }

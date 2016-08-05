@@ -19,6 +19,7 @@
 #pragma once
 
 #include <assert.h>
+#include <limits.h>
 
 #include <unordered_map>
 #include <unordered_set>
