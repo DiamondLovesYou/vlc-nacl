@@ -220,6 +220,7 @@ PP_Var vlc_ppapi_mk_str_var(atomic_uintptr_t* var, const char* const init, const
   if(!atomic_compare_exchange_strong(var, &expected,
                                      (uintptr_t)new_var)) {
     // another thread beat us.
+    ivar->Release(*new_var);
     free(new_var);
     return *(PP_Var*) atomic_load(var);
   } else {
