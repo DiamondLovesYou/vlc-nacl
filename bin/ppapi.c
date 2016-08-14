@@ -283,6 +283,7 @@ static PP_Bool vlc_did_create(PP_Instance instance, uint32_t _argc,
   var_Create(media_player, "ppapi-instance", VLC_VAR_INTEGER);
   var_SetInteger(media_player, "ppapi-instance", instance);
   var_SetString(media_player, "vout", "ppapi_vout_graphics3d");
+  libvlc_audio_output_set(media_player, "ppapi_aout");
 
   if(-1 == libvlc_add_intf(vlc_inst, "ppapi_control")) {
     vlc_ppapi_log_error(instance, "failed to start `ppapi-control`");
