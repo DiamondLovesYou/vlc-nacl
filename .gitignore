@@ -19,3 +19,8 @@
 build*
 contrib-*
 install-*
+
+Cargo.lock
+tests/target
+tests/src/ppapi/target
+tests/src/vlc/target

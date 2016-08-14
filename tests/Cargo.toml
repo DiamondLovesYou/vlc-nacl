@@ -1,0 +1,15 @@
+[package]
+authors = ["Richard Diamond <wichard@vitalitystudios.com>"]
+name = "tests"
+version = "0.1.0"
+
+[dependencies]
+stainless = "*"
+
+[dependencies.ppapi]
+path = "src/ppapi"
+version = "*"
+
+[dependencies.vlc]
+path = "src/vlc"
+version = "*"

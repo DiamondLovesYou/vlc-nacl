@@ -14,12 +14,10 @@ SOURCES := 						\
 	modules/video_output/ppapi-vout-window.c 	\
 	src/ppapi.c
 
-OBJ_DIR := $(BUILD_DIR)/obj
-
 OBJS := $(SOURCES:%.c=$(OBJ_DIR)/%.o)
 OBJS := $(OBJS:%.cpp=$(OBJ_DIR)/%.o)
 
-all: $(BUILD_DIR)/vlc.pexe $(BUILD_DIR)/vlc.nexe
+default: all
 
 -include $(OBJS:.o=.d)
 
@@ -29,6 +27,19 @@ $(OBJ_DIR)/%.o: %.c
 $(OBJ_DIR)/%.o: %.cpp
 	mkdir -p $(shell dirname $@)
 	$(CXX) -MP -MD $(CXXFLAGS) -c $< -o $@
+
+ifneq ($(TESTING),0)
+
+all: $(BUILD_DIR)/libppapi_modules.a
+
+# create an archive
+
+$(BUILD_DIR)/libppapi_modules.a: $(OBJS)
+	$(AR) crs $@ $^
+
+else
+
+all: $(BUILD_DIR)/vlc.pexe $(BUILD_DIR)/vlc.nexe
 
 ifeq ($(PNACL),1)
 $(OBJ_DIR)/vlc.bugged.pexe: $(OBJS)
@@ -52,4 +63,5 @@ vlc.pexe:
 # nothing
 
 
+endif
 endif

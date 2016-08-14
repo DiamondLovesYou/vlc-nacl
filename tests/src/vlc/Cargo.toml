@@ -1,0 +1,13 @@
+[package]
+authors = ["Richard Diamond <wichard@vitalitystudios.com>"]
+build = "src/build.rs"
+name = "vlc"
+version = "0.1.0"
+
+[build-dependencies]
+bindgen = "0.19.0"
+gcc = "0.3"
+syntex_syntax = "0.38.0"
+
+[dependencies]
+libc = "*"

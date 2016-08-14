@@ -32,6 +32,24 @@
 #  include <ppapi/c/ppb_var_dictionary.h>
 #  include <ppapi/c/ppb_view.h>
 
+#  ifdef __VLC_PNACL_TESTING__
+
+struct PPB_Var_Vlc_Pnacl_Testing_Ext {
+  void (*AddRef)(struct PP_Var var);
+  void (*Release)(struct PP_Var var);
+  struct PP_Var (*VarFromUtf8)(const char* data, uint32_t len);
+  const char* (*VarToUtf8)(struct PP_Var var, uint32_t* len);
+  PP_Resource (*VarToResource)(struct PP_Var var);
+  struct PP_Var (*VarFromResource)(PP_Resource resource);
+  struct PP_Var (*GlobalVarFromUtf8)(const char* data, uint32_t len);
+};
+typedef struct PPB_Var_Vlc_Pnacl_Testing_Ext PPB_Var_1_2__;
+
+#  else
+
+typedef struct PPB_Var_1_2 PPB_Var_1_2__;
+
+#  endif
 /* typedefs to the versioned types in the PPAPI */
 typedef struct PPB_Audio_1_1           vlc_ppapi_audio_t;
 typedef struct PPB_AudioConfig_1_1     vlc_ppapi_audio_config_t;
@@ -50,7 +68,7 @@ typedef struct PPB_Messaging_1_2       vlc_ppapi_messaging_t;
 typedef struct PPB_URLLoader_1_0       vlc_ppapi_url_loader_t;
 typedef struct PPB_URLRequestInfo_1_0  vlc_ppapi_url_request_info_t;
 typedef struct PPB_URLResponseInfo_1_0 vlc_ppapi_url_response_info_t;
-typedef struct PPB_Var_1_2             vlc_ppapi_var_t;
+typedef        PPB_Var_1_2__           vlc_ppapi_var_t;
 typedef struct PPB_VarArray_1_0        vlc_ppapi_var_array_t;
 typedef struct PPB_VarDictionary_1_0   vlc_ppapi_var_dictionary_t;
 typedef struct PPB_View_1_2            vlc_ppapi_view_t;

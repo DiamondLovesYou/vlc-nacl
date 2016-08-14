@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 SRC_DIR=$(dirname `readlink -f $0`)
 BUILD_DIR=$(readlink -f `pwd`)
@@ -91,6 +91,7 @@ VERBOSE_MAKE=0
 
 CLEAN=0
 SET_MAKEFILE_O=0
+ONLY_TEST=0
 
 # load the config file:
 if [ -f ${BUILD_DIR}/config.sh ]; then
@@ -137,6 +138,15 @@ while [ $# -gt 0 ]; do
         --verbose-make)
             VERBOSE_MAKE=1
             ;;
+        --enable-tests)
+            RUN_TESTS=1
+            ;;
+        --disable-tests)
+            RUN_TESTS=0
+            ;;
+        --only-test)
+            ONLY_TEST=1
+            ;;
     esac
     shift
 done
@@ -163,6 +173,24 @@ putvar ARCH
 putvar RELEASE
 putvar MAKE
 putvar VERBOSE_MAKE
+putvar RUN_TESTS
+
+showvar ONLY_TEST
+
+# More functions
+
+fix_optimization() {
+    local BUILD_DIR=$1
+    if [ $SET_MAKEFILE_O -ne 0 ]; then
+        if [ $RELEASE -eq 0 ]; then
+            OPT_LEVEL="\-O0"
+        else
+            OPT_LEVEL="\-O2"
+        fi
+
+        for i in `find $BUILD_DIR -name Makefile`; do sed -i "s/\-O[0-3sz]/${OPT_LEVEL}/g" $i; done
+    fi
+}
 
 # CONFIGURE DONE
 
@@ -180,7 +208,7 @@ step_msg "configure done"
 # VLC CONFIGURE ARGUMENTS #
 ###########################
 
-VLC_CONFIGURE_ARGS="--disable-shared --enable-static --disable-vlc --disable-a52 --enable-gles2 --disable-xcb --disable-xvideo --disable-libgcrypt --disable-lua --disable-vlm --disable-sout --disable-addonmanagermodules --disable-httpd --disable-alsa --disable-pulse --disable-svg --disable-svgdec --disable-ncurses --disable-shout --disable-gnutls --disable-screen --disable-dbus --disable-udev --disable-upnp --disable-goom --disable-projectm --disable-mtp --disable-vsxu --disable-qt --disable-skins2 --disable-vdpau --disable-vda --without-contrib --disable-aribsub --disable-optimizations --disable-swscale"
+VLC_CONFIGURE_ARGS="--disable-shared --enable-static --disable-vlc --disable-a52 --enable-gles2 --disable-xcb --disable-xvideo --disable-libgcrypt --disable-lua --disable-vlm --disable-sout --disable-addonmanagermodules --disable-httpd --disable-alsa --disable-pulse --disable-svg --disable-svgdec --disable-ncurses --disable-shout --disable-gnutls --disable-screen --disable-dbus --disable-udev --disable-upnp --disable-goom --disable-projectm --disable-mtp --disable-vsxu --disable-qt --disable-skins2 --disable-vdpau --disable-vda --without-contrib --disable-aribsub --disable-optimizations --disable-swscale --disable-notify --disable-bluray --disable-opencv"
 
 ########################
 # VLC MODULE BLACKLIST #
@@ -193,6 +221,8 @@ VLC_MODULE_BLACKLIST="syslog"
 #########
 
 TARGET_TRIPLE="${ARCH}-unknown-nacl"
+
+OBJ_DIR="${BUILD_DIR}/obj-${TARGET_TRIPLE}"
 
 OS=`$NACL_SDK_ROOT/tools/getos.py`
 # We always use the PNaCl/Clang toolchain (which can also target NaCl).
@@ -216,8 +246,6 @@ case $ARCH in
 esac
 
 WEBPORTS_SYSROOT=$SYSROOT/$ARCH-nacl
-
-export PATH=${SYSROOT}/bin:$PATH
 
 # Make in //
 if [ -z "$MAKEFLAGS" ]; then
@@ -244,13 +272,13 @@ CFLAGS="${CFLAGS} -fstrict-aliasing -funsafe-math-optimizations"
 
 if [ "$PNACL" = "1" ]; then
     # matroska uses exceptions:
-    CFLAGS="${CFLAGS} --pnacl-exceptions=sjlj"
+    PNACL_CFLAGS="--pnacl-exceptions=sjlj"
 
     CFLAGS="${CFLAGS} -ffp-contract=off"
 fi
 
 CFLAGS="${CFLAGS} $(${NACL_SDK_ROOT}/tools/nacl_config.py ${CONFIG_ARGS} --cflags)"
-CFLAGS="${CFLAGS} -I${WEBPORTS_SYSROOT}/usr/include -I${WEBPORTS_SYSROOT}/usr/include/glibc-compat"
+CFLAGS="${CFLAGS} -I${WEBPORTS_SYSROOT}/usr/include -I${WEBPORTS_SYSROOT}/usr/include/glibc-compat -I${OBJ_DIR}"
 
 case $ARCH in
     le32)
@@ -342,8 +370,9 @@ if [ ! -e ./config.h ]; then
 
     CPPFLAGS="$CFLAGS" \
             CFLAGS="$CFLAGS ${EXTRA_CFLAGS}" \
-            CXXFLAGS="$CFLAGS ${EXTRA_CXXFLAGS}" \
+            CXXFLAGS="$CFLAGS $PNACL_CXXFLAGS ${EXTRA_CXXFLAGS}" \
             LDFLAGS="$LDFLAGS ${EXTRA_LDFLAGS}" \
+            PATH="${SYSROOT}/bin:$PATH" \
             sh $VLC_SRC_DIR/configure --host=$TARGET_TRIPLE --target=$TARGET_TRIPLE \
             ${EXTRA_PARAMS} ${VLC_CONFIGURE_ARGS} ${OPTS}
     checkfail "vlc: configure failed"
@@ -355,18 +384,10 @@ fi
 # BUILDING #
 ############
 
-if [ $SET_MAKEFILE_O -ne 0 ]; then
-    if [ $RELEASE -eq 0 ]; then
-        OPT_LEVEL="\-O0"
-    else
-        OPT_LEVEL="\-O2"
-    fi
-
-    for i in `find $BUILD_DIR -name Makefile`; do sed -i "s/\-O[0-3sz]/${OPT_LEVEL}/g" $i; done
-fi
+fix_optimization $VLC_BUILD_DIR
 
 step_msg "Building VLC"
-$MAKE $MAKEFLAGS V=$VERBOSE_MAKE
+PATH="${SYSROOT}/bin:$PATH" $MAKE $MAKEFLAGS V=$VERBOSE_MAKE
 checkfail "vlc: make failed"
 
 cd $SRC_DIR
@@ -375,26 +396,9 @@ cd $SRC_DIR
 # libVLC modules #
 ##################
 
-msg "Generating static module list"
-blacklist_regexp=
-for i in ${VLC_MODULE_BLACKLIST}
-do
-    if [ -z "${blacklist_regexp}" ]
-    then
-        blacklist_regexp="${i}"
-    else
-        blacklist_regexp="${blacklist_regexp}|${i}"
-    fi
-done
-
-find_modules()
-{
-    echo "`find $1 -name 'lib*plugin.a' | grep -vE "lib(${blacklist_regexp})_plugin.a" | tr '\n' ' '`"
-}
-
 libtool_deps() {
     . $1
-    local libname="`echo $old_library | sed 's/.*\/\?lib\(.*\)\.a/\1/'`"
+    local libname="`echo $old_library | sed 's/lib\(.*\)\.a/\1/'`"
 
     if [ $libname != "compat" ]; then
         LIBS="${LIBS} -l${libname}"
@@ -421,43 +425,174 @@ libtool_deps() {
     done;
 }
 
-VLC_MODULES=$(find_modules $VLC_BUILD_DIR/modules)
-for file in $VLC_MODULES; do
-    libname=`echo $file | sed 's/.*\.libs\/lib\(.*\)\.a/\1/'`
-    name=`echo $file | sed 's/.*\.libs\/lib//' | sed 's/_plugin\.a//'`
-    la_name=`dirname $file`/`basename -s .a $file`.la
-    BUILTINS="$BUILTINS\nPLUGIN_INIT_SYMBOL($name)"
-    libtool_deps $la_name
-done;
+build_static_module_init() {
+    local VLC_MODULE_BLACKLIST=$1
+    local VLC_BUILD_DIR=$2
+    local OUT=$3
 
-PPAPI_MODULES="ppapi_access ppapi_control ppapi_aout ppapi_vout_gl ppapi_vout_graphics3d ppapi_vout_window"
-for mod in $PPAPI_MODULES; do
-    BUILTINS="$BUILTINS\nPLUGIN_INIT_SYMBOL($mod)"
-done;
+    LIBS=""
+    BUILTINS=""
 
-printf "/* Autogenerated from the list of modules */\n$BUILTINS\n" > ${BUILD_DIR}/vlc_static_modules_init.h
+    local blacklist_regexp=
+    for i in $(echo ${VLC_MODULE_BLACKLIST} | tr ' ' '\n'); do
+        if [ -z "${blacklist_regexp}" ]; then
+            blacklist_regexp="${i}"
+        else
+            blacklist_regexp="${blacklist_regexp}|${i}"
+        fi
+    done
 
-libtool_deps $VLC_BUILD_DIR/src/libvlccore.la
-libtool_deps $VLC_BUILD_DIR/lib/libvlc.la
+    local VLC_MODULES=`find ${VLC_BUILD_DIR}/modules -name 'lib*plugin.a' | grep -vE "lib(${blacklist_regexp})_plugin.a" | tr '\n' ' '`
+    for file in $VLC_MODULES; do
+        libname=`echo $file | sed 's/.*\.libs\/lib\(.*\)\.a/\1/'`
+        name=`echo $file | sed 's/.*\.libs\/lib//' | sed 's/_plugin\.a//'`
+        la_name=`dirname $file`/`basename -s .a $file`.la
+        BUILTINS="$BUILTINS\nPLUGIN_INIT_SYMBOL($name)"
+        libtool_deps $la_name
+    done;
 
-step_msg "Building self"
+    local PPAPI_MODULES=$(echo "ppapi_access ppapi_control ppapi_aout ppapi_vout_gl ppapi_vout_graphics3d ppapi_vout_window" | \
+                                 tr ' ' '\n' | grep -vE "(${blacklist_regexp})" | tr '\n' ' ')
+    for mod in $PPAPI_MODULES; do
+        BUILTINS="$BUILTINS\nPLUGIN_INIT_SYMBOL($mod)"
+    done;
 
-if [ $CLEAN -ne 0 ]; then
-    rm $BUILD_DIR/vlc.*
-fi
+    local OUT_TMP=$OUT.tmp
+    printf "/* Autogenerated from the list of modules */\n$BUILTINS\n" > $OUT_TMP
+    if [ $CLEAN -ne 0 ]; then
+        rm -fr $OUT;
+    fi
+    move_if_changed $OUT_TMP $OUT
+    rm -fr $OUT_TMP;
 
-CFLAGS="${CFLAGS} -I${SRC_DIR}/vlc/include -I${SRC_DIR}/include -I${VLC_BUILD_DIR} -I${BUILD_DIR}"
-LDFLAGS="$LDFLAGS ${EXTRA_LDFLAGS} -L${VLC_BUILD_DIR}/compat/.libs/ -L${VLC_BUILD_DIR}/lib/.libs/ -L${VLC_BUILD_DIR}/modules/.libs/ -L${VLC_BUILD_DIR}/src/.libs/ -L${WEBPORTS_SYSROOT}/usr/lib ${LIBS}"
+    libtool_deps $VLC_BUILD_DIR/src/libvlccore.la
+    libtool_deps $VLC_BUILD_DIR/lib/libvlc.la
+}
 
-CPPFLAGS="$CFLAGS" \
+if [ $ONLY_TEST -eq 0 ]; then
+    step_msg "Generating static module list"
+
+    build_static_module_init "${VLC_MODULE_BLACKLIST}" "${VLC_BUILD_DIR}" \
+                             "${OBJ_DIR}/vlc_static_modules_init.h"
+
+    step_msg "Building self"
+
+    if [ $CLEAN -ne 0 ]; then
+        rm $BUILD_DIR/vlc.*
+    fi
+
+    CFLAGS="${CFLAGS} -I${SRC_DIR}/vlc/include -I${SRC_DIR}/include -I${VLC_BUILD_DIR} -I${OBJ_DIR}"
+    LDFLAGS="$LDFLAGS ${EXTRA_LDFLAGS} -L${VLC_BUILD_DIR}/compat/.libs/ -L${VLC_BUILD_DIR}/lib/.libs/ -L${VLC_BUILD_DIR}/modules/.libs/ -L${VLC_BUILD_DIR}/src/.libs/ -L${WEBPORTS_SYSROOT}/usr/lib ${LIBS}"
+
+    CPPFLAGS="$CFLAGS" \
             CFLAGS="$CFLAGS ${EXTRA_CFLAGS}" \
-            CXXFLAGS="$CFLAGS ${EXTRA_CXXFLAGS}" \
+            CXXFLAGS="$CFLAGS $PNACL_CXXFLAGS ${EXTRA_CXXFLAGS}" \
             LDFLAGS="$LDFLAGS" \
             \
-            $MAKE $MAKEFLAGS V=$VERBOSE_MAKE IN_COMPILE_SH=1 BUILD_DIR="${BUILD_DIR}" PNACL="${PNACL}" \
+            $MAKE $MAKEFLAGS V=$VERBOSE_MAKE IN_COMPILE_SH=1 BUILD_DIR="${BUILD_DIR}" \
+            PNACL="${PNACL}" TESTING=0 OBJ_DIR="${OBJ_DIR}" \
             OPT="${SYSROOT}/bin/pnacl-opt" TRANS="${SYSROOT}/bin/pnacl-translate" \
             FREEZE="${SYSROOT}/bin/pnacl-freeze" BCCOMPRESS="${SYSROOT}/bin/pnacl-bccompress"\
             MACHINE=`uname -m` RELEASE=$RELEASE
-checkfail "make failed"
+    checkfail "make failed"
+fi
+
+
+if [ $RUN_TESTS -ne 0 ]; then
+
+    # Build VLC and the ppapi modules for the host platform
+    # We target i686/32bit because PNACL is 32bit, and we get type errors if we don't.
+    # TODO XXX x86 Linux specific.
+
+    step_msg "Building tests"
+
+    CC="clang"
+    CXX="clang++"
+    AR=ar
+    unset LD
+    unset NM
+    unset RANLIB
+    unset STRIP
+    unset PKG_CONFIG_LIBDIR
+
+    unset CFLAGS; unset EXTRA_CFLAGS;
+    unset CXXFLAGS; unset EXTRA_CXXFLAGS;
+    unset SYSROOT;
+
+    VLC_BUILD_DIR=$BUILD_DIR/vlc-host
+    OBJ_DIR="${BUILD_DIR}/obj-host"
+
+    showvar VLC_BUILD_DIR
+    showvar OBJ_DIR
+
+    CFLAGS="-m32 -g -I${SRC_DIR}/vlc/include -I${SRC_DIR}/include -I${VLC_BUILD_DIR} -I${NACL_SDK_ROOT}/include -I${OBJ_DIR}"
+    CFLAGS="${CFLAGS} -D__VLC_PNACL_TESTING__"
+
+    CXXFLAGS="${CFLAGS}"
+
+    CFLAGS="-std=gnu11 ${CFLAGS} ${EXTRA_CFLAGS}"
+    CXXFLAGS="-std=gnu++11 ${CXXFLAGS} ${EXTRA_CXXFLAGS}"
+
+    export CC;
+    export CXX;
+    export CFLAGS;
+    export CXXFLAGS;
+
+    showvar CC
+    showvar CXX
+    showvar CFLAGS
+    showvar CXXFLAGS
+
+    # || [ ${SRC_DIR}/compile -nt $VLC_BUILD_DIR/config.h ]
+    if [ ! -e $VLC_BUILD_DIR/config.h ]; then
+        rm -fr $VLC_BUILD_DIR
+        make_dir $VLC_BUILD_DIR
+        cd $VLC_BUILD_DIR
+
+        step_msg "Configuring VLC for host..."
+        $VLC_SRC_DIR/configure ${VLC_CONFIGURE_ARGS} --disable-freetype --disable-sdl --disable-caca --disable-vnc \
+                               --disable-gles1 --disable-gles2 --disable-smbclient --disable-vpx --disable-sndio \
+                               --disable-mpc --disable-sid --disable-ogg --build=i686-linux-gnu \
+                               --host=i686-linux-gnu --target=i686-linux-gnu
+
+        checkfail "host vlc configure failed"
+
+        fix_optimization $VLC_BUILD_DIR
+        cd $SRC_DIR
+    fi
+
+    cd $VLC_BUILD_DIR
+    $MAKE $MAKEFLAGS V=$VERBOSE_MAKE
+    checkfail "host vlc make failed"
+
+    make_dir ${OBJ_DIR}
+    VLC_MODULE_BLACKLIST="$VLC_MODULE_BLACKLIST gles2 glspectrum gl ppapi_vout_graphics3d ppapi_vout_gl"
+    step_msg "building module list"
+    build_static_module_init "${VLC_MODULE_BLACKLIST}" "${VLC_BUILD_DIR}" "${OBJ_DIR}/vlc_static_modules_init.h"
+
+    cd $SRC_DIR
+    $MAKE $MAKEFLAGS V=$VERBOSE_MAKE IN_COMPILE_SH=1 TESTING=1 OBJ_DIR="${OBJ_DIR}" \
+          BUILD_DIR="${OBJ_DIR}"
+    checkfail "host self compile failed"
+
+    COMPILE_LOC=${SRC_DIR}/compile
+    export COMPILE_LOC;
+
+    export VLC_INCLUDE_DIR=${SRC_DIR}/vlc/include;
+    export VLC_BUILD_DIR;
+    export LIBPPAPI=${BUILD_DIR}/obj-host/libppapi_modules.a
+    export VLC_MODULE_BLACKLIST;
+
+    export RUST_BACKTRACE=1;
+    CARGO_ARGS="--target i686-unknown-linux-gnu --verbose"
+
+    cd ${SRC_DIR};
+    cargo test ${CARGO_ARGS} --manifest-path ${SRC_DIR}/tests/src/ppapi/Cargo.toml
+    #cargo test ${CARGO_ARGS} --manifest-path ${SRC_DIR}/tests/src/vlc/Cargo.toml
+    cargo test ${CARGO_ARGS} --manifest-path ${SRC_DIR}/tests/Cargo.toml
+
+    exit 1
+
+fi
 
 step_msg "Done! :)"

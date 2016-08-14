@@ -214,7 +214,11 @@ PP_Var vlc_ppapi_mk_str_var(atomic_uintptr_t* var, const char* const init, const
     return PP_MakeNull();
   }
 
+#ifdef __VLC_PNACL_TESTING__
+  *new_var = ivar->GlobalVarFromUtf8(init, len);
+#else
   *new_var = ivar->VarFromUtf8(init, len);
+#endif
 
   uintptr_t expected = 0;
   if(!atomic_compare_exchange_strong(var, &expected,
