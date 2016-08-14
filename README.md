@@ -28,6 +28,9 @@ points to your Pepper SDK root, and `$WEBPORTS_ROOT` points to the root of your
 `webports` checkout. `compile` will fetch and build the needed `webports`
 packages for you.
 
+If you're developing this port, please also pass `--enable-tests` to `./compile`
+(one has to be on Linux for this currently).
+
 # Embedding VLC
 
     <script async>
