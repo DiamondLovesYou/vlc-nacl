@@ -20,6 +20,9 @@ build*
 contrib-*
 install-*
 
+# but don't ignore build.rs
+!build.rs
+
 Cargo.lock
 tests/target
 tests/src/ppapi/target
