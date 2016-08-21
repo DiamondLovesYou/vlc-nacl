@@ -286,7 +286,8 @@ case $ARCH in
         CFLAGS="${CFLAGS}"
         ;;
     x86_64|i686|arm)
-
+        msg "TODO XXX"
+        exit 1
         ;;
 esac
 
