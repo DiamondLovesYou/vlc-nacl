@@ -194,7 +194,7 @@ Take a look at `ppapi-control.js` in `extras/ppapi-control.js` for more info.
 
 ## Issues
 
- * XXX: There are no tests!
+ * TODO(WIP): Tests. See `tests/src/main.rs`.
  * The author hasn't extensively tested `ppapi-access.cpp` on slow connections (ie
    not localhost).
  * NaCl's service runtime/IRT doesn't support clock selection (though getting
