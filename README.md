@@ -2,7 +2,7 @@
 
 This project provides additional modules needed to use VLC from within a NaCl or
 PNaCl module. With this project, built for PNaCl, VLC is able to play media within
-abritrary websites (ie doesn't require use of a Chrome Store app).
+arbitrary websites (ie doesn't require use of a Chrome Store app).
 
 ## The Build
 
